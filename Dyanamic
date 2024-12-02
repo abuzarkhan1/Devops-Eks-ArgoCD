@@ -1,0 +1,67 @@
+pipeline {
+    agent any
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main', url: 'https://github.com/abuzarkhan1/Devops-Eks-ArgoCD.git'
+            }
+        }
+        stage('Docker Build Image') {
+            steps {
+                script {
+                    def shortCommit = sh(
+                        script: "git rev-parse --short HEAD",
+                        returnStdout: true
+                    ).trim()
+                    env.IMAGE_TAG = "abuzarkhan1/netflix:${shortCommit}"
+                    sh "docker build --build-arg API_KEY=794cee3ccdc629933512fc84db90cd51 -t ${env.IMAGE_TAG} ."
+                }
+            }
+        }
+        stage('Trivy Image Scan') {
+            steps {
+                sh "trivy image ${env.IMAGE_TAG} > trivyimage.txt"
+            }
+        }
+        stage('Docker Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                        sh "docker push ${env.IMAGE_TAG}"
+                    }
+                }
+            }
+        }
+        stage('Update Kubernetes YAML') {
+            steps {
+                script {
+                    def deploymentFilePath = "EKS/deploy.yaml"
+                    sh """
+                        sed -i 's|image: .*|image: ${env.IMAGE_TAG}|g' ${deploymentFilePath}
+                    """
+                }
+            }
+        }
+        stage('Commit Updated YAML to Git') {
+            steps {
+                script {
+                    sh '''
+                        git config user.name "Abuzar"
+                        git config user.email "abuzarkhan1242@gmail.com"
+                        git add EKS/deploy.yaml
+                        git commit -m "Updated image to ${IMAGE_TAG}"
+                        git push origin main
+                    '''
+                }
+            }
+        }
+    }
+}
